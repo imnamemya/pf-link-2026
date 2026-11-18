@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="robots" content="noindex, nofollow, noarchive" />
+  <title>Private Portfolio — Link Access Only</title>
+  <style>
+    :root {
+      color-scheme: dark;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: radial-gradient(circle at 50% 20%, #161b33 0%, #07090e 70%);
+      color: #f4f6fb;
+      font-family: -apple-system, BlinkMacSystemFont, "Pretendard", "Segoe UI", Roboto, sans-serif;
+      padding: 24px;
+    }
+    .lock-card {
+      width: 100%;
+      max-width: 440px;
+      background: rgba(19, 23, 34, 0.85);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 22px;
+      padding: 36px 30px;
+      text-align: center;
+      backdrop-filter: blur(16px);
+      box-shadow: 0 24px 64px rgba(0, 0, 0, 0.65);
+    }
+    .lock-icon {
+      width: 56px;
+      height: 56px;
+      border-radius: 16px;
+      background: linear-gradient(135deg, rgba(124, 92, 255, 0.2), rgba(0, 212, 255, 0.15));
+      border: 1px solid rgba(124, 92, 255, 0.4);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 26px;
+      margin-bottom: 18px;
+    }
+    h1 {
+      font-size: 20px;
+      font-weight: 800;
+      margin-bottom: 10px;
+      letter-spacing: -0.02em;
+    }
+    p {
+      font-size: 13.5px;
+      color: #9aa3b8;
+      line-height: 1.65;
+      margin-bottom: 24px;
+    }
+    .key-form {
+      display: flex;
+      gap: 8px;
+    }
+    .key-input {
+      flex: 1;
+      padding: 11px 14px;
+      border-radius: 12px;
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      background: rgba(255, 255, 255, 0.04);
+      color: #fff;
+      font-size: 13.5px;
+      outline: none;
+    }
+    .key-input:focus {
+      border-color: #7c5cff;
+    }
+    .key-btn {
+      padding: 11px 18px;
+      border-radius: 12px;
+      border: none;
+      background: linear-gradient(135deg, #7c5cff, #5b8cff);
+      color: #fff;
+      font-weight: 700;
+      font-size: 13.5px;
+      cursor: pointer;
+    }
+    .err-msg {
+      margin-top: 12px;
+      font-size: 12.5px;
+      color: #ff6b81;
+      display: none;
+    }
+    .loading-wrap {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 14px;
+    }
+    .spinner {
+      width: 34px;
+      height: 34px;
+      border: 3px solid rgba(124, 92, 255, 0.25);
+      border-top-color: #7c5cff;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body>
+  <div class="lock-card" id="statusCard">
+    <div class="loading-wrap" id="loadingView">
+      <div class="spinner"></div>
+      <p style="margin:0;">보안 링크 확인 및 포트폴리오 복호화 중...</p>
+    </div>
+    <div id="lockedView" style="display:none;">
+      <div class="lock-icon">🔒</div>
+      <h1>비공개 포트폴리오 (링크 전용)</h1>
+      <p>
+        이 포트폴리오는 <strong>AES-GCM 암호화</strong>로 보호되어 있어<br />
+        공유받은 <strong>전용 전체 링크</strong>로 접속한 경우에만 열람할 수 있습니다.
+      </p>
+      <form class="key-form" onsubmit="handleManualKey(event)">
+        <input type="password" id="manualKeyInput" class="key-input" placeholder="보안 액세스 키 입력..." autocomplete="off" />
+        <button type="submit" class="key-btn">열람</button>
+      </form>
+      <div class="err-msg" id="errMsg">유효하지 않은 보안 링크 또는 액세스 키입니다.</div>
+    </div>
+  </div>
+
+  <script>
+    function b64ToBytes(b64) {
+      const bin = atob(b64);
+      const arr = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+      return arr;
+    }
+
+    function b64UrlToBytes(b64url) {
+      let b64 = b64url.replace(/-/g, '+').replace(/_/g, '/');
+      while (b64.length % 4 !== 0) b64 += '=';
+      return b64ToBytes(b64);
+    }
+
+    function extractKeyFromUrl() {
+      const hash = (window.location.hash || '').replace(/^#/, '').trim();
+      if (hash) {
+        if (hash.startsWith('k=')) return hash.slice(2);
+        return hash;
+      }
+      const params = new URLSearchParams(window.location.search);
+      return (params.get('k') || '').trim();
+    }
+
+    async function unlockWithKey(rawKey, isManual) {
+      try {
+        if (!rawKey || rawKey.length < 16) throw new Error('Invalid key length');
+        const keyBytes = b64UrlToBytes(rawKey);
+        const res = await fetch('payload.enc.json', { cache: 'no-cache' });
+        if (!res.ok) throw new Error('Payload fetch failed');
+        const payload = await res.json();
+
+        const cryptoKey = await crypto.subtle.importKey(
+          'raw',
+          keyBytes,
+          { name: 'AES-GCM' },
+          false,
+          ['decrypt']
+        );
+
+        const ivBytes = b64ToBytes(payload.iv);
+        const ctBytes = b64ToBytes(payload.ct);
+
+        const plainBuf = await crypto.subtle.decrypt(
+          { name: 'AES-GCM', iv: ivBytes },
+          cryptoKey,
+          ctBytes
+        );
+
+        const decodedHtml = new TextDecoder('utf-8').decode(plainBuf);
+        document.open();
+        document.write(decodedHtml);
+        document.close();
+      } catch (err) {
+        document.getElementById('loadingView').style.display = 'none';
+        document.getElementById('lockedView').style.display = 'block';
+        if (isManual) {
+          document.getElementById('errMsg').style.display = 'block';
+        }
+      }
+    }
+
+    function handleManualKey(e) {
+      e.preventDefault();
+      const val = document.getElementById('manualKeyInput').value.trim();
+      if (!val) return;
+      // If user pasted the full URL, extract hash
+      const hashIdx = val.indexOf('#');
+      const cleanKey = hashIdx !== -1 ? val.slice(hashIdx + 1).replace(/^k=/, '') : val.replace(/^k=/, '');
+      window.location.hash = cleanKey;
+      unlockWithKey(cleanKey, true);
+    }
+
+    (function init() {
+      const k = extractKeyFromUrl();
+      if (k) {
+        unlockWithKey(k, false);
+      } else {
+        document.getElementById('loadingView').style.display = 'none';
+        document.getElementById('lockedView').style.display = 'block';
+      }
+    })();
+  </script>
+</body>
+</html>
